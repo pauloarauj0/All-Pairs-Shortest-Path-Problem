@@ -17,8 +17,8 @@ void setup_grid(GRID_INFO_TYPE* grid) {
 
     MPI_Comm_size(MPI_COMM_WORLD, &(grid->p));
     MPI_Comm_rank(MPI_COMM_WORLD, &old_rank);
-    grid->p = (int)sqrt((double)grid->p);
-    dimensions[0] = dimensions[1] = grid->p;
+    grid->q = (int)sqrt((double)grid->p);
+    dimensions[0] = dimensions[1] = grid->q;
     periods[0] = periods[1] = 1;
     MPI_Cart_create(MPI_COMM_WORLD, 2, dimensions, periods, 1, &(grid->comm));
     MPI_Comm_rank(grid->comm, &(grid->my_rank));
@@ -57,8 +57,39 @@ int check_fox(int nprocess, int nodes) {
     }
     return 1;
 }
+/**
+ * @brief Allocates memory for a matrix
+ *
+ * @param m matrix
+ * @param n number of nodes
+ */
+int** allocate_memory(int** m, int n) {
+    m = (int**)malloc(sizeof(int) * n * n);
+    for (int i = 0; i < n; i++) {
+        m[i] = (int*)malloc(sizeof(int) * n);
+    }
+
+    return m;
+}
+void recieve_input(int** m, int n) {
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            scanf("%d", &m[i][j]);
+        }
+    }
+}
+
+void print_matrix(int** m, int n) {
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            printf("%d ", m[i][j]);
+        }
+        printf("\n");
+    }
+}
+
 int main(int argc, char* argv[]) {
-    int my_rank, nprocess, nodes;
+    int my_rank, nprocess, nodes, **matrix;
     double finish, start;
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
@@ -69,7 +100,23 @@ int main(int argc, char* argv[]) {
         if (check_fox(nprocess, nodes) == 0) {
             MPI_Finalize();
             exit(1);
+        } else {
+            matrix = allocate_memory(matrix, nodes);
+            recieve_input(matrix, nodes);
+            print_matrix(matrix, nodes);
         }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    start = MPI_Wtime();
+
+    /* CODIGO PARA RESOLVER O PROBLEMA*/
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    finish = MPI_Wtime();
+
+    if (my_rank == ROOT) {
+        printf("Execution time: %lf\n", finish - start);
     }
 
     MPI_Finalize();
