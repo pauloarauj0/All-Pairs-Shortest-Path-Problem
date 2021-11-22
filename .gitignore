@@ -1,2 +1,5 @@
 #ignore a.out files
 *.out
+
+#ignore executable
+shortest_path
