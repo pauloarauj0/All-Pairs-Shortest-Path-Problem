@@ -64,36 +64,37 @@ void set_to_zero(int** m, int n) {
  * @param m matrix
  * @param n number of nodes
  */
-int** allocate_memory(int** m, int n) {
-    m = (int**)malloc(sizeof(int) * n * n);
-    for (int i = 0; i < n; i++) {
-        m[i] = (int*)malloc(sizeof(int) * n);
-    }
+void allocate_memory(int*** m, int n) {
+    int* p = (int*)malloc(n * n * sizeof(int*));
+    (*m) = (int**)malloc(n * sizeof(int*));
 
-    return m;
+    for (int i = 0; i < n; i++) {
+        (*m)[i] = &(p[i * n]);
+    }
 }
 
 // implementation of the fox algorithm
-void fox(int n, GRID_INFO_TYPE* grid, int** local_A, int** local_B, int** local_C) {
+void fox(int n, GRID_INFO_TYPE* grid, int** local_A, int** local_B,
+         int** local_C) {
     int step, bcast_root, n_bar, source, dest, tag = 43, **temp_A;
     MPI_Status status;
 
     n_bar = n / grid->q;
-    /*CRIAR FUNCAO*/
+
     set_to_zero(local_C, n);
 
     source = (grid->my_row + 1) % grid->q;
     dest = (grid->my_row + grid->q - 1) % grid->q;
 
-    temp_A = allocate_memory(temp_A, n_bar);
+    allocate_memory(&temp_A, n_bar);
 
     for (step = 0; step < grid->q; step++) {
         bcast_root = (grid->my_row + step) % grid->q;
         if (bcast_root == grid->my_col) {
-            MPI_Bcast(local_A, 1, MPI_INT, bcast_root, grid->row_comm);
+            MPI_Bcast(&local_A[0][0], 1, MPI_INT, bcast_root, grid->row_comm);
             matrix_multiply(n, local_A, local_B, local_C);
         } else {
-            MPI_Bcast(temp_A, 1, MPI_INT, bcast_root, grid->row_comm);
+            MPI_Bcast(&temp_A[0][0], 1, MPI_INT, bcast_root, grid->row_comm);
             matrix_multiply(n, temp_A, local_B, local_C);
         }
         MPI_Send(local_B, 1, MPI_INT, dest, tag, grid->col_comm);
@@ -133,9 +134,17 @@ void print_matrix(int** m, int n) {
         printf("\n");
     }
 }
-
+void submatrix(int** m, GRID_INFO_TYPE* grid, int** matrix_aux, int n) {
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            int aux_i = grid->my_row * n + i;
+            int aux_j = grid->my_col * n + j;
+            matrix_aux[i][j] = m[aux_i][aux_j];
+        }
+    }
+}
 int main(int argc, char* argv[]) {
-    int my_rank, nprocess, nodes, **matrix, valid;
+    int my_rank, nprocess, nodes, **matrix, valid, half_size;
     double finish, start;
     GRID_INFO_TYPE grid;
 
@@ -145,23 +154,37 @@ int main(int argc, char* argv[]) {
 
     if (my_rank == ROOT) {
         scanf("%d", &nodes);
-        matrix = allocate_memory(matrix, nodes);
-        recieve_input(matrix, nodes);
-        print_matrix(matrix, nodes);
         valid = check_fox(nprocess, nodes);
     }
 
     MPI_Bcast(&valid, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
+    // Close the program if the input is not valid
     if (valid == 0) {
         MPI_Finalize();
         return 0;
     }
 
-    setup_grid(&grid);
-
-    //share the number of nodes with everyone
+    // Prepare to recieve the input
     MPI_Bcast(&nodes, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
+    allocate_memory(&matrix, nodes);
+
+    setup_grid(&grid);
+    half_size = nodes / grid.q;
+
+    // Root reads the input
+    if (my_rank == ROOT) {
+        recieve_input(matrix, nodes);
+        // print_matrix(matrix, nodes);
+    }
+    MPI_Bcast(&(matrix[0][0]), nodes * nodes, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+    int** m1;
+    allocate_memory(&m1, half_size);
+    submatrix(matrix, &grid, m1, half_size);
+
+    printf("Print do %d\n", my_rank);
+    print_matrix(m1, half_size);
 
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
