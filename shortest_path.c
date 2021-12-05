@@ -156,9 +156,11 @@ void fox(int n, GRID_INFO_TYPE* grid, int** local_A, int** local_B,
                       grid->row_comm);
             matrix_multiply(n, temp_A, local_B, local_C);
         }
-        MPI_Send(&local_B[0][0], n * n, MPI_INT, dest, tag, grid->col_comm);
-        MPI_Recv(&local_B[0][0], n * n, MPI_INT, source, tag, grid->col_comm,
-                 &status);
+        MPI_Sendrecv(&local_B[0][0], n * n, MPI_INT, dest, tag, &local_B[0][0],
+                     n * n, MPI_INT, source, tag, grid->col_comm, &status);
+        // MPI_Send(&local_B[0][0], n * n, MPI_INT, dest, tag, grid->col_comm);
+        // MPI_Recv(&local_B[0][0], n * n, MPI_INT, source, tag, grid->col_comm,
+        //          &status);
     }
 }
 
@@ -173,9 +175,8 @@ int main(int argc, char* argv[]) {
 
     if (my_rank == ROOT) {
         scanf("%d", &nodes);
-        valid = check_fox(nprocess, nodes);
     }
-
+    valid = check_fox(nprocess, nodes);
     MPI_Bcast(&valid, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
     // Close the program if the input is not valid
@@ -216,12 +217,13 @@ int main(int argc, char* argv[]) {
     }
 
     // printf("Print do %d\n", my_rank);
-    print_matrix(res, half_size);
+    // print_matrix(res, half_size);
     MPI_Barrier(MPI_COMM_WORLD);
     finish = MPI_Wtime();
 
     if (my_rank == ROOT) {
-        // printf("Execution time: %lf\n", finish - start);
+        printf("Execution time: %lf\n", finish - start);
+        printf("%d\n", valid);
     }
     MPI_Finalize();
     return 0;
