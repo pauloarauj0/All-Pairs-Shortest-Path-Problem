@@ -5,7 +5,7 @@
 
 #include "structs.h"
 #define ROOT 0
-#define INF 99999
+#define INF 999999
 /**
  * @brief Allocates memory for a matrix
  *
@@ -35,6 +35,18 @@ void print_matrix(int** m, int n) {
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             // remove the INF
+            // if (m[i][j] == INF) {
+            //     m[i][j] = 0;
+            // }
+            printf("%d ", m[i][j]);
+        }
+        printf("\n");
+    }
+}
+void print_matrix_clean(int** m, int n) {
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            // remove the INF
             if (m[i][j] == INF) {
                 m[i][j] = 0;
             }
@@ -43,6 +55,7 @@ void print_matrix(int** m, int n) {
         printf("\n");
     }
 }
+
 void submatrix(int** m, GRID_INFO_TYPE* grid, int** matrix_aux, int n) {
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
@@ -138,12 +151,11 @@ void fox(int n, GRID_INFO_TYPE* grid, int** local_A, int** local_B,
          int** local_C) {
     int step, bcast_root, n_bar, source, dest, tag = 43, **temp_A;
     MPI_Status status;
-
     set_to_inf(local_C, n);
+    allocate_memory(&temp_A, n);
+
     source = (grid->my_row + 1) % grid->q;
     dest = (grid->my_row + grid->q - 1) % grid->q;
-
-    allocate_memory(&temp_A, n);
 
     for (step = 0; step < grid->q; step++) {
         bcast_root = (grid->my_row + step) % grid->q;
@@ -156,11 +168,8 @@ void fox(int n, GRID_INFO_TYPE* grid, int** local_A, int** local_B,
                       grid->row_comm);
             matrix_multiply(n, temp_A, local_B, local_C);
         }
-        MPI_Sendrecv(&local_B[0][0], n * n, MPI_INT, dest, tag, &local_B[0][0],
-                     n * n, MPI_INT, source, tag, grid->col_comm, &status);
-        // MPI_Send(&local_B[0][0], n * n, MPI_INT, dest, tag, grid->col_comm);
-        // MPI_Recv(&local_B[0][0], n * n, MPI_INT, source, tag, grid->col_comm,
-        //          &status);
+        MPI_Sendrecv_replace(&local_B[0][0], n * n, MPI_INT, dest, tag, source,
+                             tag, grid->col_comm, &status);
     }
 }
 
@@ -175,14 +184,15 @@ int main(int argc, char* argv[]) {
 
     if (my_rank == ROOT) {
         scanf("%d", &nodes);
+        valid = check_fox(nprocess, nodes);
     }
-    valid = check_fox(nprocess, nodes);
+
     MPI_Bcast(&valid, 1, MPI_INT, ROOT, MPI_COMM_WORLD);
 
     // Close the program if the input is not valid
     if (valid == 0) {
         MPI_Finalize();
-        return 0;
+        exit(0);
     }
 
     // Prepare to recieve the input
@@ -195,35 +205,45 @@ int main(int argc, char* argv[]) {
     // Root reads the input
     if (my_rank == ROOT) {
         recieve_input(matrix, nodes);
-        // print_matrix(matrix, nodes);
     }
-    // MPI_Bcast(&(matrix[0][0]), nodes * nodes, MPI_INT, ROOT, MPI_COMM_WORLD);
-    int **m1, **res;
-    allocate_memory(&m1, half_size);
-    allocate_memory(&res, half_size);
-    MPI_Scatter(&matrix[0][0], half_size * half_size, MPI_INT, &m1[0][0],
-                half_size * half_size, MPI_INT, ROOT, MPI_COMM_WORLD);
 
-    // submatrix(matrix, &grid, m1, half_size);
+    MPI_Bcast(&(matrix[0][0]), nodes * nodes, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+    int **m1, **m2, **res;
+    allocate_memory(&m1, half_size);
+    allocate_memory(&m2, half_size);
+    allocate_memory(&res, half_size);
+    submatrix(matrix, &grid, m1, half_size);
+    submatrix(matrix, &grid, m2, half_size);
 
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 
     /* CODIGO PARA RESOLVER O PROBLEMA*/
-
     for (int i = 1; i < nodes - 1; i *= 2) {
-        fox(half_size, &grid, m1, m1, res);
+        fox(half_size, &grid, m1, m2, res);
         m1 = transfer_matrix(res, half_size);
+        m2 = transfer_matrix(res, half_size);
     }
 
-    // printf("Print do %d\n", my_rank);
-    // print_matrix(res, half_size);
+    int** gather;
+    allocate_memory(&gather, nodes);
+    MPI_Gather(&res[0][0], half_size * half_size, MPI_INT, &gather[0][0],
+               half_size * half_size, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+    if (my_rank == ROOT) {
+        printf("--------------------------------\n");
+        print_matrix_clean(gather, nodes);
+        printf("--------------------------------\n");
+    }
     MPI_Barrier(MPI_COMM_WORLD);
     finish = MPI_Wtime();
 
     if (my_rank == ROOT) {
+        printf("--------------------------------\n");
+        // print_matrix_clean(matrix, nodes);
         printf("Execution time: %lf\n", finish - start);
-        printf("%d\n", valid);
+        printf("--------------------------------\n");
     }
     MPI_Finalize();
     return 0;
