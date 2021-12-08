@@ -30,19 +30,16 @@ void recieve_input(int** m, int n) {
         }
     }
 }
-
+// DEBUG
 void print_matrix(int** m, int n) {
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
-            // remove the INF
-            // if (m[i][j] == INF) {
-            //     m[i][j] = 0;
-            // }
             printf("%d ", m[i][j]);
         }
         printf("\n");
     }
 }
+// RESULT
 void print_matrix_clean(int** m, int n) {
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
@@ -53,16 +50,6 @@ void print_matrix_clean(int** m, int n) {
             printf("%d ", m[i][j]);
         }
         printf("\n");
-    }
-}
-
-void submatrix(int** m, GRID_INFO_TYPE* grid, int** matrix_aux, int n) {
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < n; j++) {
-            int aux_i = grid->my_row * n + i;
-            int aux_j = grid->my_col * n + j;
-            matrix_aux[i][j] = m[aux_i][aux_j];
-        }
     }
 }
 
@@ -207,14 +194,38 @@ int main(int argc, char* argv[]) {
         recieve_input(matrix, nodes);
     }
 
-    MPI_Bcast(&(matrix[0][0]), nodes * nodes, MPI_INT, ROOT, MPI_COMM_WORLD);
+    MPI_Datatype new_matrix;
+    MPI_Type_vector(half_size, half_size, half_size * grid.q, MPI_INT,
+                    &new_matrix);
+    MPI_Type_commit(&new_matrix);
 
-    int **m1, **m2, **res;
+    int **m1, **m2, **res, **input;
+    allocate_memory(&input, nodes);
     allocate_memory(&m1, half_size);
     allocate_memory(&m2, half_size);
-    allocate_memory(&res, half_size);
-    submatrix(matrix, &grid, m1, half_size);
-    submatrix(matrix, &grid, m2, half_size);
+    allocate_memory(&res, nodes);
+    MPI_Request req;
+
+    if (my_rank == 0) {
+        int offsetY = 0;
+        int offsetX = 0;
+        for (int p = 0; p < nprocess; p++) {
+            MPI_Isend(&matrix[offsetY][offsetX], 1, new_matrix, p, 0,
+                      MPI_COMM_WORLD, &req);
+
+            if (offsetX + half_size >= nodes) {
+                offsetX = 0;
+                offsetY += half_size;
+            } else
+                offsetX += half_size;
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Recv(&input[0][0], 1, new_matrix, ROOT, 0, MPI_COMM_WORLD,
+             MPI_STATUS_IGNORE);
+
+    m1 = transfer_matrix(input, half_size);
+    m2 = transfer_matrix(m1, half_size);
 
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
@@ -228,20 +239,29 @@ int main(int argc, char* argv[]) {
 
     int** gather;
     allocate_memory(&gather, nodes);
-    MPI_Gather(&res[0][0], half_size * half_size, MPI_INT, &gather[0][0],
-               half_size * half_size, MPI_INT, ROOT, MPI_COMM_WORLD);
+
+    MPI_Isend(&res[0][0], 1, new_matrix, ROOT, 0, MPI_COMM_WORLD, &req);
 
     if (my_rank == ROOT) {
-        printf("--------------------------------\n");
-        print_matrix_clean(gather, nodes);
-        printf("--------------------------------\n");
+        int offsetY = 0;
+        int offsetX = 0;
+        for (int p = 0; p < nprocess; p++) {
+            MPI_Recv(&gather[offsetY][offsetX], 1, new_matrix, p, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            if (offsetX + half_size >= nodes) {
+                offsetX = 0;
+                offsetY += half_size;
+            } else
+                offsetX += half_size;
+        }
     }
     MPI_Barrier(MPI_COMM_WORLD);
     finish = MPI_Wtime();
 
     if (my_rank == ROOT) {
         printf("--------------------------------\n");
-        // print_matrix_clean(matrix, nodes);
+        print_matrix_clean(gather, nodes);
         printf("Execution time: %lf\n", finish - start);
         printf("--------------------------------\n");
     }
