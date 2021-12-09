@@ -20,12 +20,7 @@ void allocate_memory(int*** m, int n) {
         (*m)[i] = &(p[i * n]);
     }
 }
-void free_memory(int** m, int n) {
-    for (int i = 0; i < n; i++) {
-        free(m[i]);
-    }
-    free(m);
-}
+
 void recieve_input(int** m, int n) {
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
