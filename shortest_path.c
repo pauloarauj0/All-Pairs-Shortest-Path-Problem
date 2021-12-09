@@ -20,6 +20,12 @@ void allocate_memory(int*** m, int n) {
         (*m)[i] = &(p[i * n]);
     }
 }
+void free_memory(int** m, int n) {
+    for (int i = 0; i < n; i++) {
+        free(m[i]);
+    }
+    free(m);
+}
 void recieve_input(int** m, int n) {
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
@@ -159,11 +165,52 @@ void fox(int n, GRID_INFO_TYPE* grid, int** local_A, int** local_B,
                              tag, grid->col_comm, &status);
     }
 }
+/**
+ * @brief Sends the right block into each process
+ *
+ */
+void send_blocks(int** matrix, MPI_Datatype new_matrix, int nprocess,
+                 int half_size, int nodes) {
+    int offsetY = 0;
+    int offsetX = 0;
+    MPI_Request req;
+
+    for (int p = 0; p < nprocess; p++) {
+        MPI_Isend(&matrix[offsetY][offsetX], 1, new_matrix, p, 0,
+                  MPI_COMM_WORLD, &req);
+
+        if (offsetX + half_size >= nodes) {
+            offsetX = 0;
+            offsetY += half_size;
+        } else
+            offsetX += half_size;
+    }
+}
+/**
+ * @brief Receives all the blocks from the processes
+ *
+ */
+void receive_blocks(int** gather, MPI_Datatype new_matrix, int nprocess,
+                    int half_size, int nodes) {
+    int offsetY = 0;
+    int offsetX = 0;
+    for (int p = 0; p < nprocess; p++) {
+        MPI_Recv(&gather[offsetY][offsetX], 1, new_matrix, p, 0, MPI_COMM_WORLD,
+                 MPI_STATUS_IGNORE);
+
+        if (offsetX + half_size >= nodes) {
+            offsetX = 0;
+            offsetY += half_size;
+        } else
+            offsetX += half_size;
+    }
+}
 
 int main(int argc, char* argv[]) {
     int my_rank, nprocess, nodes, **matrix, valid, half_size;
     double finish, start;
     GRID_INFO_TYPE grid;
+    MPI_Request req;
 
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
@@ -194,6 +241,7 @@ int main(int argc, char* argv[]) {
         recieve_input(matrix, nodes);
     }
 
+    // New datatype to divide the original matrix into blocks
     MPI_Datatype new_matrix;
     MPI_Type_vector(half_size, half_size, half_size * grid.q, MPI_INT,
                     &new_matrix);
@@ -204,21 +252,9 @@ int main(int argc, char* argv[]) {
     allocate_memory(&m1, half_size);
     allocate_memory(&m2, half_size);
     allocate_memory(&res, nodes);
-    MPI_Request req;
 
-    if (my_rank == 0) {
-        int offsetY = 0;
-        int offsetX = 0;
-        for (int p = 0; p < nprocess; p++) {
-            MPI_Isend(&matrix[offsetY][offsetX], 1, new_matrix, p, 0,
-                      MPI_COMM_WORLD, &req);
-
-            if (offsetX + half_size >= nodes) {
-                offsetX = 0;
-                offsetY += half_size;
-            } else
-                offsetX += half_size;
-        }
+    if (my_rank == ROOT) {
+        send_blocks(matrix, new_matrix, nprocess, half_size, nodes);
     }
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Recv(&input[0][0], 1, new_matrix, ROOT, 0, MPI_COMM_WORLD,
@@ -230,7 +266,7 @@ int main(int argc, char* argv[]) {
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 
-    /* CODIGO PARA RESOLVER O PROBLEMA*/
+    /*Resolve the problem*/
     for (int i = 1; i < nodes - 1; i *= 2) {
         fox(half_size, &grid, m1, m2, res);
         m1 = transfer_matrix(res, half_size);
@@ -239,23 +275,12 @@ int main(int argc, char* argv[]) {
 
     int** gather;
     allocate_memory(&gather, nodes);
-
     MPI_Isend(&res[0][0], 1, new_matrix, ROOT, 0, MPI_COMM_WORLD, &req);
 
     if (my_rank == ROOT) {
-        int offsetY = 0;
-        int offsetX = 0;
-        for (int p = 0; p < nprocess; p++) {
-            MPI_Recv(&gather[offsetY][offsetX], 1, new_matrix, p, 0,
-                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-            if (offsetX + half_size >= nodes) {
-                offsetX = 0;
-                offsetY += half_size;
-            } else
-                offsetX += half_size;
-        }
+        receive_blocks(gather, new_matrix, nprocess, half_size, nodes);
     }
+
     MPI_Barrier(MPI_COMM_WORLD);
     finish = MPI_Wtime();
 
@@ -265,6 +290,14 @@ int main(int argc, char* argv[]) {
         printf("Execution time: %lf\n", finish - start);
         printf("--------------------------------\n");
     }
+
+    free(gather);
+    free(m1);
+    free(m2);
+    free(res);
+    free(input);
+    free(matrix);
+
     MPI_Finalize();
     return 0;
 }
